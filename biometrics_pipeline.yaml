@@ -1,0 +1,159 @@
+# PIPELINE DEFINITION
+# Name: multimodal-biometrics-pipeline
+# Description: An MLOps pipeline for multimodal data using PyArrow and PyTorch.
+# Inputs:
+#    batch_size: int [Default: 32.0]
+#    dataset_name: str [Default: 'ninadmehendale/multimodal-iris-fingerprint-biometric-data']
+#    epochs: int [Default: 5.0]
+components:
+  comp-preprocess-data-op:
+    executorLabel: exec-preprocess-data-op
+    inputDefinitions:
+      parameters:
+        dataset_name:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        processed_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-train-model-op:
+    executorLabel: exec-train-model-op
+    inputDefinitions:
+      artifacts:
+        processed_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        batch_size:
+          parameterType: NUMBER_INTEGER
+        epochs:
+          parameterType: NUMBER_INTEGER
+deploymentSpec:
+  executors:
+    exec-preprocess-data-op:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - preprocess_data_op
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.2'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef preprocess_data_op(dataset_name: str, processed_data: Output[Dataset]):\n\
+          \    from src.data_utils import download_and_preprocess\n\n    download_and_preprocess(\n\
+          \        kaggle_dataset=dataset_name,\n        output_path=processed_data.path\
+          \  # Pass the artifact path\n    )\n\n"
+        image: biometrics-pipeline:v3
+    exec-train-model-op:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train_model_op
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.2'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train_model_op(\n    processed_data: Input[Dataset],\n    epochs:\
+          \ int,\n    batch_size: int\n):\n    from src.train import train_model\n\
+          \n    train_model(\n        data_path=processed_data.path, # Pass the artifact\
+          \ path\n        epochs=epochs,\n        batch_size=batch_size\n    )\n\n"
+        image: biometrics-pipeline:v3
+        resources:
+          cpuLimit: 2.0
+          cpuRequest: 1.0
+          memoryLimit: 4.0
+          memoryRequest: 2.0
+          resourceCpuLimit: '2'
+          resourceCpuRequest: '1'
+          resourceMemoryLimit: 4G
+          resourceMemoryRequest: 2G
+pipelineInfo:
+  description: An MLOps pipeline for multimodal data using PyArrow and PyTorch.
+  name: multimodal-biometrics-pipeline
+root:
+  dag:
+    tasks:
+      preprocess-data-op:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-preprocess-data-op
+        inputs:
+          parameters:
+            dataset_name:
+              componentInputParameter: dataset_name
+        taskInfo:
+          name: preprocess-data-op
+      train-model-op:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-model-op
+        dependentTasks:
+        - preprocess-data-op
+        inputs:
+          artifacts:
+            processed_data:
+              taskOutputArtifact:
+                outputArtifactKey: processed_data
+                producerTask: preprocess-data-op
+          parameters:
+            batch_size:
+              componentInputParameter: batch_size
+            epochs:
+              componentInputParameter: epochs
+        taskInfo:
+          name: train-model-op
+  inputDefinitions:
+    parameters:
+      batch_size:
+        defaultValue: 32.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      dataset_name:
+        defaultValue: ninadmehendale/multimodal-iris-fingerprint-biometric-data
+        isOptional: true
+        parameterType: STRING
+      epochs:
+        defaultValue: 5.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.15.2
